@@ -10,10 +10,12 @@ namespace dp
 	public:
 		using Index = int;
 		using FuncType = std::function<ReturnType(memoize<Size, ReturnType, ArgTypes...>& Self, ArgTypes...)>;
-		Index _NextIndex = 0;
-		Index _Count = 0;
 
-		memoize(const FuncType& Func) : _Func(Func) { static_assert(Size % 2 == 0, "Size of memoize has to be a power of 2."); }
+		memoize(const FuncType& Func) 
+			: _Func(Func) 
+		{ 
+			static_assert(Size % 2 == 0, "Size of memoize has to be a power of 2."); 
+		}
 
 		struct SBucket
 		{
@@ -34,10 +36,12 @@ namespace dp
 			SBucket::SEntry _BucketEntry;
 		} _Cache[Size];
 
-		ReturnType operator()(const ArgTypes... Arguments)
+		ReturnType operator()(const ArgTypes&... Arguments)
 		{
 			size_t Hash = 0;
-			((Hash ^= std::hash<std::decay_t<decltype(Arguments)>>{}(Arguments)+0xeeffddcc + (Hash << 5) + (Hash >> 3)), ...);
+			std::apply([&](auto&... Hashers) {
+				((Hash ^= Hashers(Arguments) + 0x9e3779b9 + (Hash << 6) + (Hash >> 2)), ...);
+				}, _Hashers);
 			Index BucketIndex = Hash & (Size - 1);
 
 			SCache* pCachedEntry = nullptr;
@@ -66,7 +70,7 @@ namespace dp
 					SBucket& RemoveFromBucket = _Buckets[BucketEntry._BucketIndex];
 
 					if(BucketEntry._SlotIndex < RemoveFromBucket._Count)
-						std::swap(RemoveFromBucket._Slots[BucketEntry._SlotIndex], RemoveFromBucket._Slots[RemoveFromBucket._Count - (Index)1]);
+						std::swap(RemoveFromBucket._Slots[BucketEntry._SlotIndex], RemoveFromBucket._Slots[RemoveFromBucket._Count - 1]);
 
 					RemoveFromBucket._Count--;
 				}
@@ -88,5 +92,10 @@ namespace dp
 
 	private:
 		FuncType _Func;
+
+		std::tuple<std::hash<std::decay_t<ArgTypes>>...> _Hashers;
+
+		Index _NextIndex = 0;
+		Index _Count = 0;
 	};
 }
