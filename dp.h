@@ -40,14 +40,14 @@ namespace dp
 			((Hash ^= std::hash<std::decay_t<decltype(Arguments)>>{}(Arguments)+0xeeffddcc + (Hash << 5) + (Hash >> 3)), ...);
 			Index BucketIndex = Hash & (Size - 1);
 
-			std::tuple<ArgTypes...> ArgumentsTuple = std::make_tuple(Arguments...);
-
 			SCache* pCachedEntry = nullptr;
 			SBucket& Bucket = _Buckets[BucketIndex];
 			for (Index i = 0; i < Bucket._Count; i++)
 			{
 				SCache& CachedEntry = _Cache[Bucket._Slots[i]];
-				if (CachedEntry._Arguments == ArgumentsTuple)
+				if (std::apply([&](auto&... CachedArguments) {
+					return ((CachedArguments == Arguments) && ...);
+				}, CachedEntry._Arguments))
 				{
 					pCachedEntry = &CachedEntry;
 					break;
@@ -71,7 +71,7 @@ namespace dp
 					RemoveFromBucket._Count--;
 				}
 
-				pCachedEntry->_Arguments = std::move(ArgumentsTuple);
+				pCachedEntry->_Arguments = std::make_tuple(Arguments...);
 				pCachedEntry->_ReturnValue = std::move(ReturnValue);
 				pCachedEntry->_BucketEntry._BucketIndex = BucketIndex;
 				pCachedEntry->_BucketEntry._SlotIndex = Bucket._Count;
