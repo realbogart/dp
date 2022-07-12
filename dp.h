@@ -15,26 +15,16 @@ namespace dp
 			: _Func(Func) 
 		{ 
 			static_assert(Size % 2 == 0, "Size of memoize has to be a power of 2."); 
-		}
 
-		struct SBucket
-		{
-			Index _Slots[Size];
-			Index _Count = 0;
+			_WasteBucket._Count = Size;
 
-			struct SEntry
+			for (Index i = 0; i < Size; i++)
 			{
-				Index _BucketIndex = -1;
-				Index _SlotIndex = -1;
-			};
-		} _Buckets[Size];
-
-		struct SCache
-		{
-			std::tuple<ArgTypes...> _Arguments;
-			ReturnType _ReturnValue = ReturnType();
-			SBucket::SEntry _BucketEntry;
-		} _Cache[Size];
+				SCache& Cache = _Cache[i];
+				Cache._SlotIndex = 0;
+				Cache._pBucket = &_WasteBucket;
+			}
+		}
 
 		ReturnType operator()(const ArgTypes&... Arguments)
 		{
@@ -42,10 +32,8 @@ namespace dp
 			std::apply([&](auto&... Hashers) {
 				((Hash ^= Hashers(Arguments) + 0x9e3779b9 + (Hash << 6) + (Hash >> 2)), ...);
 				}, _Hashers);
-			Index BucketIndex = Hash & (Size - 1);
 
-			SCache* pCachedEntry = nullptr;
-			SBucket& Bucket = _Buckets[BucketIndex];
+			SBucket& Bucket = _Buckets[Hash & (Size - 1)];
 			for (Index i = 0; i < Bucket._Count; i++)
 			{
 				SCache& CachedEntry = _Cache[Bucket._Slots[i]];
@@ -53,49 +41,45 @@ namespace dp
 					return ((CachedArguments == Arguments) && ...);
 				}, CachedEntry._Arguments))
 				{
-					pCachedEntry = &CachedEntry;
-					break;
+					return CachedEntry._ReturnValue;
 				}
 			}
 
-			if (!pCachedEntry)
-			{
-				ReturnType ReturnValue = _Func(*this, Arguments...);
+			ReturnType ReturnValue = _Func(*this, Arguments...);
+			SCache& CachedEntry = _Cache[_NextIndex];
+			SBucket& RemoveFromBucket = *CachedEntry._pBucket;
+			std::swap(RemoveFromBucket._Slots[CachedEntry._SlotIndex], RemoveFromBucket._Slots[--RemoveFromBucket._Count]);
+			std::apply([&](auto&... CachedArguments) {
+				((CachedArguments = Arguments), ...);
+				}, CachedEntry._Arguments);
+			CachedEntry._ReturnValue = std::move(ReturnValue);
+			CachedEntry._pBucket = &Bucket;
+			CachedEntry._SlotIndex = Bucket._Count;
+			Bucket._Slots[Bucket._Count++] = _NextIndex;
+			_NextIndex = ++_NextIndex & (Size - 1);
 
-				pCachedEntry = &_Cache[_NextIndex];
-
-				if (_Count == Size)
-				{
-					const SBucket::SEntry& BucketEntry = pCachedEntry->_BucketEntry;
-					SBucket& RemoveFromBucket = _Buckets[BucketEntry._BucketIndex];
-
-					if(BucketEntry._SlotIndex < RemoveFromBucket._Count)
-						std::swap(RemoveFromBucket._Slots[BucketEntry._SlotIndex], RemoveFromBucket._Slots[RemoveFromBucket._Count - 1]);
-
-					RemoveFromBucket._Count--;
-				}
-
-				pCachedEntry->_Arguments = std::make_tuple(Arguments...);
-				pCachedEntry->_ReturnValue = std::move(ReturnValue);
-				pCachedEntry->_BucketEntry._BucketIndex = BucketIndex;
-				pCachedEntry->_BucketEntry._SlotIndex = Bucket._Count;
-
-				Bucket._Slots[Bucket._Count] = _NextIndex;
-				Bucket._Count++;
-
-				_Count = std::min(++_Count, Size);
-				_NextIndex = ++_NextIndex % Size;
-			}
-
-			return pCachedEntry->_ReturnValue;
+			return CachedEntry._ReturnValue;
 		}
 
 	private:
-		FuncType _Func;
+		struct SBucket
+		{
+			Index _Slots[Size];
+			Index _Count = 0;
+		} _Buckets[Size];
+
+		SBucket _WasteBucket;
+
+		struct SCache
+		{
+			std::tuple<ArgTypes...> _Arguments;
+			ReturnType _ReturnValue = ReturnType();
+			SBucket* _pBucket;
+			Index _SlotIndex;
+		} _Cache[Size];
 
 		std::tuple<std::hash<std::decay_t<ArgTypes>>...> _Hashers;
-
+		FuncType _Func;
 		Index _NextIndex = 0;
-		Index _Count = 0;
 	};
 }
